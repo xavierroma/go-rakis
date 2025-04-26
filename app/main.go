@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"flag"
@@ -60,9 +61,13 @@ func handler(ctx context.Context, conn net.Conn) {
 			}
 			fmt.Println("Request handled:", req)
 			fmt.Println("Handling response...")
-			res := Response{}
-			handleResponse(ctx, conn, req, &res)
-			respond(ctx, conn, res)
+			res, err := handleResponse(ctx, conn, req)
+			if err != nil {
+				fmt.Println("Error handling response:", err)
+				conn.Close()
+				return
+			}
+			respond(ctx, conn, req, res)
 			fmt.Println("Response handled")
 			if req.Headers["Connection"] == "close" {
 				conn.Close()
@@ -160,41 +165,44 @@ const (
 type Response struct {
 	Status  Status
 	Body    []byte
-	Headers []string
+	Headers map[string]string
 }
 
-func handleResponse(ctx context.Context, conn net.Conn, req Request, res *Response) {
+func handleResponse(ctx context.Context, conn net.Conn, req Request) (Response, error) {
+	res := Response{
+		Headers: make(map[string]string),
+	}
 	if req.Method == "GET" && req.Target == "/" {
 		res.Status = StatusOK
 		res.Body = []byte("Hello, World!")
-		res.Headers = append(res.Headers, "Content-Type: text/plain")
-		res.Headers = append(res.Headers, fmt.Sprintf("Content-Length: %d", len(res.Body)))
+		res.Headers["Content-Type"] = "text/plain"
+		res.Headers["Content-Length"] = fmt.Sprintf("%d", len(res.Body))
 	} else if req.Method == "GET" && strings.HasPrefix(req.Target, "/echo") {
 		res.Status = StatusOK
 		echoTarget := strings.TrimPrefix(req.Target, "/echo/")
 		res.Body = []byte(echoTarget)
-		res.Headers = append(res.Headers, "Content-Type: text/plain")
-		res.Headers = append(res.Headers, fmt.Sprintf("Content-Length: %d", len(res.Body)))
+		res.Headers["Content-Type"] = "text/plain"
+		res.Headers["Content-Length"] = fmt.Sprintf("%d", len(res.Body))
 	} else if req.Method == "GET" && req.Target == "/user-agent" {
 		res.Status = StatusOK
 		res.Body = []byte(req.Headers["User-Agent"])
-		res.Headers = append(res.Headers, "Content-Type: text/plain")
-		res.Headers = append(res.Headers, fmt.Sprintf("Content-Length: %d", len(res.Body)))
+		res.Headers["Content-Type"] = "text/plain"
+		res.Headers["Content-Length"] = fmt.Sprintf("%d", len(res.Body))
 	} else if req.Method == "GET" && strings.HasPrefix(req.Target, "/files/") {
 		res.Status = StatusOK
 		path := directory + "/" + strings.TrimPrefix(req.Target, "/files/")
 		_, err := os.Stat(path)
 		if err != nil {
 			res.Status = StatusNotFound
-			res.Headers = append(res.Headers, "Content-Length: 0")
+			res.Headers["Content-Length"] = "0"
 		} else {
 			body, err := os.ReadFile(path)
 			if err != nil {
 				fmt.Println("Error reading file:", err)
-				return
+				return res, fmt.Errorf("error reading file: %w", err)
 			}
-			res.Headers = append(res.Headers, "Content-Type: application/octet-stream")
-			res.Headers = append(res.Headers, fmt.Sprintf("Content-Length: %d", len(body)))
+			res.Headers["Content-Type"] = "application/octet-stream"
+			res.Headers["Content-Length"] = fmt.Sprintf("%d", len(body))
 		}
 	} else if req.Method == "POST" && strings.HasPrefix(req.Target, "/files/") {
 		res.Status = StatusCreated
@@ -203,34 +211,32 @@ func handleResponse(ctx context.Context, conn net.Conn, req Request, res *Respon
 		_, err := strconv.Atoi(contentLengthStr)
 		if err != nil {
 			fmt.Println("Error converting Content-Length to integer:", err)
-			return
+			return res, fmt.Errorf("error converting Content-Length to integer: %w", err)
 		}
 		if req.Body == nil {
 			fmt.Println("Error: POST request has no body")
 			res.Status = StatusBadRequest
-			res.Headers = append(res.Headers, "Content-Length: 0")
+			res.Headers["Content-Length"] = "0"
 		} else {
 			err = os.WriteFile(path, []byte(*req.Body), 0o644)
 			if err != nil {
 				fmt.Println("Error writing file:", err)
 				res.Status = StatusInternalServerError
-				res.Headers = append(res.Headers, "Content-Length: 0")
+				res.Headers["Content-Length"] = "0"
 			} else {
 				res.Status = StatusCreated
-				res.Headers = append(res.Headers, "Content-Length: 0")
+				res.Headers["Content-Length"] = "0"
 			}
 		}
 	} else {
 		res.Status = StatusNotFound
-		res.Headers = append(res.Headers, "Content-Length: 0")
+		res.Headers["Content-Length"] = "0"
 	}
 
-	if req.Headers["Connection"] == "close" {
-		res.Headers = append(res.Headers, "Connection: close")
-	}
+	return res, nil
 }
 
-func respond(ctx context.Context, conn net.Conn, res Response) {
+func respond(ctx context.Context, conn net.Conn, req Request, res Response) {
 	crlf := []byte("\r\n")
 
 	rspMap := map[Status]string{
@@ -241,16 +247,24 @@ func respond(ctx context.Context, conn net.Conn, res Response) {
 		StatusCreated:             "HTTP/1.1 201 Created",
 	}
 
+	if req.Headers["Connection"] == "close" {
+		res.Headers["Connection"] = "close"
+	}
+
+	compression := req.Headers["Accept-Encoding"]
+	if compression == "gzip" {
+		res.Headers["Content-Encoding"] = "gzip"
+	}
 	rspLine := rspMap[res.Status]
 	_, err := conn.Write([]byte(rspLine))
 	if err != nil {
 		fmt.Println("Error writing status line:", err)
 		return
 	}
-	for _, h := range res.Headers {
-		_, err = conn.Write([]byte(h))
+	for k, v := range res.Headers {
+		_, err = conn.Write([]byte(fmt.Sprintf("%s: %s", k, v)))
 		if err != nil {
-			fmt.Println("Error writing header:", h, err)
+			fmt.Println("Error writing header:", k, v, err)
 			return
 		}
 	}
@@ -259,9 +273,35 @@ func respond(ctx context.Context, conn net.Conn, res Response) {
 		fmt.Println("Error writing CRLF after headers:", err)
 		return
 	}
-	_, err = conn.Write(res.Body)
+
+	if res.Body != nil {
+		if compression == "gzip" {
+			gz, err := gzip.NewWriterLevel(conn, gzip.BestCompression)
+			if err != nil {
+				fmt.Println("Error creating gzip writer:", err)
+				return
+			}
+			_, err = gz.Write(res.Body)
+			if err != nil {
+				fmt.Println("Error writing body:", err)
+				return
+			}
+			err = gz.Close()
+			if err != nil {
+				fmt.Println("Error closing gzip writer:", err)
+				return
+			}
+		} else {
+			_, err = conn.Write(res.Body)
+			if err != nil {
+				fmt.Println("Error writing body:", err)
+				return
+			}
+		}
+	}
+	_, err = conn.Write(crlf)
 	if err != nil {
-		fmt.Println("Error writing body:", err)
+		fmt.Println("Error writing CRLF after body:", err)
 		return
 	}
 }
