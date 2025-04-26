@@ -12,7 +12,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 )
 
 var directory string
@@ -37,26 +36,38 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("Connection accepted")
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		go func() {
-			handler(ctx, conn)
-		}()
+		go handler(context.Background(), conn)
 	}
 }
 
 func handler(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
 	fmt.Println("Handling request...")
-	req, err := handleRequest(ctx, conn)
-	if err != nil {
-		fmt.Println("Error handling request:", err)
-		return
+	for {
+		select {
+		case <-ctx.Done():
+			conn.Close()
+			return
+		default:
+			req, err := handleRequest(ctx, conn)
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					fmt.Println("Client closed connection.")
+				} else {
+					fmt.Println("Error handling request:", err)
+				}
+				conn.Close()
+				return
+			}
+			fmt.Println("Request handled:", req)
+			fmt.Println("Handling response...")
+			handleResponse(ctx, conn, req)
+			fmt.Println("Response handled")
+			if req.Headers["Connection"] == "close" {
+				conn.Close()
+				return
+			}
+		}
 	}
-	fmt.Println("Request handled:", req)
-	fmt.Println("Handling response...")
-	handleResponse(ctx, conn, req)
-	fmt.Println("Response handled")
 }
 
 type Request struct {
