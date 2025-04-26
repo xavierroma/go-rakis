@@ -131,6 +131,22 @@ func handleResponse(ctx context.Context, conn net.Conn, req Request) {
 		body = []byte(req.Headers["User-Agent"])
 		headers = append(headers, "Content-Type: text/plain")
 		headers = append(headers, fmt.Sprintf("Content-Length: %d", len(body)))
+	} else if req.Method == "GET" && strings.HasPrefix(req.Target, "/files/") {
+		response = "HTTP/1.1 200 OK"
+		path := "/tmp/" + strings.TrimPrefix(req.Target, "/files/")
+		_, err := os.Stat(path)
+		if err != nil {
+			response = "HTTP/1.1 404 Not Found"
+			headers = append(headers, "Content-Length: 0")
+		} else {
+			body, err = os.ReadFile(path)
+			if err != nil {
+				fmt.Println("Error reading file:", err)
+				return
+			}
+			headers = append(headers, "Content-Type: application/octet-stream")
+			headers = append(headers, fmt.Sprintf("Content-Length: %d", len(body)))
+		}
 	} else {
 		response = "HTTP/1.1 404 Not Found"
 		headers = append(headers, "Content-Length: 0")
