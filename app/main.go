@@ -212,6 +212,10 @@ func handleResponse(ctx context.Context, conn net.Conn, req Request) {
 		headers = append(headers, "Content-Length: 0")
 	}
 
+	if req.Headers["Connection"] == "close" {
+		headers = append(headers, "Connection: close")
+	}
+
 	_, err := conn.Write([]byte(response))
 	if err != nil {
 		fmt.Println("Error writing status line:", err)
