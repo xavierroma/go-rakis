@@ -5,14 +5,22 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
+var directory string
+
 func main() {
+	flag.StringVar(&directory, "directory", "/tmp", "directory to serve files from")
+	flag.Parse()
+
 	fmt.Println("Logs from your program will appear here!")
 
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
@@ -62,6 +70,7 @@ type Request struct {
 func handleRequest(ctx context.Context, conn net.Conn) (Request, error) {
 	result := Request{
 		Headers: make(map[string]string),
+		Body:    nil,
 	}
 	reader := bufio.NewReader(conn)
 
@@ -106,6 +115,22 @@ func handleRequest(ctx context.Context, conn net.Conn) (Request, error) {
 		result.Headers[key] = value
 	}
 
+	if result.Method == "POST" {
+		if contentLengthStr, ok := result.Headers["Content-Length"]; ok {
+			contentLength, err := strconv.Atoi(contentLengthStr)
+			if err != nil {
+				return result, fmt.Errorf("invalid Content-Length: %w", err)
+			}
+			bodyBytes := make([]byte, contentLength)
+			_, err = io.ReadFull(reader, bodyBytes)
+			if err != nil {
+				return result, fmt.Errorf("error reading request body: %w", err)
+			}
+			bodyStr := string(bodyBytes)
+			result.Body = &bodyStr
+		}
+	}
+
 	return result, nil
 }
 
@@ -133,7 +158,7 @@ func handleResponse(ctx context.Context, conn net.Conn, req Request) {
 		headers = append(headers, fmt.Sprintf("Content-Length: %d", len(body)))
 	} else if req.Method == "GET" && strings.HasPrefix(req.Target, "/files/") {
 		response = "HTTP/1.1 200 OK"
-		path := "/tmp/" + strings.TrimPrefix(req.Target, "/files/")
+		path := directory + "/" + strings.TrimPrefix(req.Target, "/files/")
 		_, err := os.Stat(path)
 		if err != nil {
 			response = "HTTP/1.1 404 Not Found"
@@ -146,6 +171,30 @@ func handleResponse(ctx context.Context, conn net.Conn, req Request) {
 			}
 			headers = append(headers, "Content-Type: application/octet-stream")
 			headers = append(headers, fmt.Sprintf("Content-Length: %d", len(body)))
+		}
+	} else if req.Method == "POST" && strings.HasPrefix(req.Target, "/files/") {
+		response = "HTTP/1.1 201 Created"
+		path := directory + "/" + strings.TrimPrefix(req.Target, "/files/")
+		contentLengthStr := req.Headers["Content-Length"]
+		_, err := strconv.Atoi(contentLengthStr)
+		if err != nil {
+			fmt.Println("Error converting Content-Length to integer:", err)
+			return
+		}
+		if req.Body == nil {
+			fmt.Println("Error: POST request has no body")
+			response = "HTTP/1.1 400 Bad Request"
+			headers = append(headers, "Content-Length: 0")
+		} else {
+			err = os.WriteFile(path, []byte(*req.Body), 0o644)
+			if err != nil {
+				fmt.Println("Error writing file:", err)
+				response = "HTTP/1.1 500 Internal Server Error"
+				headers = append(headers, "Content-Length: 0")
+			} else {
+				response = "HTTP/1.1 201 Created"
+				headers = append(headers, "Content-Length: 0")
+			}
 		}
 	} else {
 		response = "HTTP/1.1 404 Not Found"
