@@ -126,6 +126,11 @@ func handleResponse(ctx context.Context, conn net.Conn, req Request) {
 		body = []byte(echoTarget)
 		headers = append(headers, "Content-Type: text/plain")
 		headers = append(headers, fmt.Sprintf("Content-Length: %d", len(body)))
+	} else if req.Method == "GET" && req.Target == "/user-agent" {
+		response = "HTTP/1.1 200 OK"
+		body = []byte(req.Headers["User-Agent"])
+		headers = append(headers, "Content-Type: text/plain")
+		headers = append(headers, fmt.Sprintf("Content-Length: %d", len(body)))
 	} else {
 		response = "HTTP/1.1 404 Not Found"
 		headers = append(headers, "Content-Length: 0")
