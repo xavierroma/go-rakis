@@ -1,37 +1,40 @@
+# go-rakis: A DIY HTTP/1.1 Server in Go
+
+It's a personal learning exercise – totally pointless for practical use.
+
+## Checklist
+
+| Feature                                                    | RFC/Documentation                                                                                                | Progress |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------- |
+| TCP Listener & Connection Acceptance                       | [MDN](https://developer.mozilla.org/en-US/docs/Glossary/TCP_Socket)                                              | ✅        |
+| Request Line Parsing (Method, Target, Version)             | [RFC 7230 §3.1.1](https://datatracker.ietf.org/doc/html/rfc7230#section-3.1.1)                                      | ✅        |
+| Header Field Parsing                                       | [RFC 7230 §3.2](https://datatracker.ietf.org/doc/html/rfc7230#section-3.2)                                          | ✅        |
+| Basic Routing (Path matching, Parameter extraction)        | N/A                                                                                                              | ✅        |
+| `GET` Method Handling                                      | [RFC 7231 §4.3.1](https://datatracker.ietf.org/doc/html/rfc7231#section-4.3.1)                                      | ✅        |
+| `HEAD` Method Handling                                     | [RFC 7231 §4.3.2](https://datatracker.ietf.org/doc/html/rfc7231#section-4.3.2)                                      | ⏳        |
+| `POST` Method Handling                                     | [RFC 7231 §4.3.3](https://datatracker.ietf.org/doc/html/rfc7231#section-4.3.3)                                      | ✅        |
+| `PUT` Method Handling                                      | [RFC 7231 §4.3.4](https://datatracker.ietf.org/doc/html/rfc7231#section-4.3.4)                                      | ⏳        |
+| `DELETE` Method Handling                                   | [RFC 7231 §4.3.5](https://datatracker.ietf.org/doc/html/rfc7231#section-4.3.5)                                      | ⏳        |
+| `CONNECT` Method Handling                                  | [RFC 7231 §4.3.6](https://datatracker.ietf.org/doc/html/rfc7231#section-4.3.6)                                      | ⏳        |
+| `OPTIONS` Method Handling                                  | [RFC 7231 §4.3.7](https://datatracker.ietf.org/doc/html/rfc7231#section-4.3.7)                                      | ⏳        |
+| `TRACE` Method Handling                                    | [RFC 7231 §4.3.8](https://datatracker.ietf.org/doc/html/rfc7231#section-4.3.8)                                      | ⏳        |
+| Response Status Line Generation                          | [RFC 7231 §6](https://datatracker.ietf.org/doc/html/rfc7231#section-6), [RFC 7230 §3.1.2](https://datatracker.ietf.org/doc/html/rfc7230#section-3.1.2) | ✅        |
+| Response Header Generation                               | [MDN](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers)                                                 | ✅        |
+| Response Body Writing                                      | N/A                                                                                                              | ✅        |
+| Gzip Response Compression (`Accept-Encoding` based)        | [RFC 7231 §5.3.4](https://datatracker.ietf.org/doc/html/rfc7231#section-5.3.4), [RFC 1952](https://datatracker.ietf.org/doc/html/rfc1952)           | ✅        |
+| Concurrent Connection Handling                           | N/A                                                                                                              | ✅        |
+| Request Body Parsing (`Content-Length` based)            | [RFC 7230 §3.3.2](https://datatracker.ietf.org/doc/html/rfc7230#section-3.3.2)                                      | ✅        |
+| Chunked Transfer Encoding                                  | [RFC 7230 §4.1](https://datatracker.ietf.org/doc/html/rfc7230#section-4.1)                                          | ⏳        |
+| Persistent Connections / Keep-Alive                      | [RFC 7230 §6.3](https://datatracker.ietf.org/doc/html/rfc7230#section-6.3)                                          | ⏳        |
+| Connection Timeouts                                        | [RFC 7230 §6.5](https://datatracker.ietf.org/doc/html/rfc7230#section-6.5)                                          | ⏳        |
+| Content Negotiation (Accept\*, etc.)                     | [RFC 7231 §5.3](https://datatracker.ietf.org/doc/html/rfc7231#section-5.3)                                          | ⏳        |
+| Caching Headers (ETag, Last-Modified, Cache-Control)     | [RFC 7232](https://datatracker.ietf.org/doc/html/rfc7232), [RFC 7234](https://datatracker.ietf.org/doc/html/rfc7234) | ⏳        |
+| Conditional Requests (If-\*)                             | [RFC 7232](https://datatracker.ietf.org/doc/html/rfc7232)                                                          | ⏳        |
+| Authentication (Authorization, WWW-Authenticate)           | [RFC 7235](https://datatracker.ietf.org/doc/html/rfc7235)                                                          | ⏳        |
+| Range Requests (Range)                                     | [RFC 7233](https://datatracker.ietf.org/doc/html/rfc7233)                                                          | ⏳        |
+| HTTPS/TLS                                                  | [RFC 2818](https://datatracker.ietf.org/doc/html/rfc2818), [RFC 8446](https://datatracker.ietf.org/doc/html/rfc8446) | ⏳        |
+
+**Note**: This is inspired by [codecrafters.io](https://codecrafters.io)'s "Build Your Own HTTP server" challenge.
+
 [![progress-banner](https://backend.codecrafters.io/progress/http-server/1fdacaf2-669f-433a-8cb1-4945aa9c7b6e)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
 
-This is a starting point for Go solutions to the
-["Build Your Own HTTP server" Challenge](https://app.codecrafters.io/courses/http-server/overview).
-
-[HTTP](https://en.wikipedia.org/wiki/Hypertext_Transfer_Protocol) is the
-protocol that powers the web. In this challenge, you'll build a HTTP/1.1 server
-that is capable of serving multiple clients.
-
-Along the way you'll learn about TCP servers,
-[HTTP request syntax](https://www.w3.org/Protocols/rfc2616/rfc2616-sec5.html),
-and more.
-
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
-
-# Passing the first stage
-
-The entry point for your HTTP server implementation is in `app/main.go`. Study
-and uncomment the relevant code, and push your changes to pass the first stage:
-
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
-
-Time to move on to the next stage!
-
-# Stage 2 & beyond
-
-Note: This section is for stages 2 and beyond.
-
-1. Ensure you have `go (1.24)` installed locally
-1. Run `./your_program.sh` to run your program, which is implemented in
-   `app/main.go`.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
