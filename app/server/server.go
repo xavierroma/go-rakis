@@ -13,26 +13,27 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codecrafters-io/http-server-starter-go/app/segmenttree"
 	"github.com/codecrafters-io/http-server-starter-go/app/types"
 )
 
+// RequestHandler is a function that processes HTTP requests
+type RequestHandler func(ctx context.Context, req types.Request) types.Response
+
 type Server struct {
-	addr   string
-	router *segmenttree.SegmentTree
+	addr    string
+	handler RequestHandler
 }
 
 type Error error
 
-func NewServer(addr string) Server {
-	return Server{
-		addr:   addr,
-		router: segmenttree.NewSegmentTree(),
+func NewServer(addr string) *Server {
+	return &Server{
+		addr: addr,
 	}
 }
 
-func (s Server) RegisterHandler(m types.Method, p string, h types.Handler) Server {
-	s.router.Insert(m, p, h)
+func (s *Server) WithHandler(h RequestHandler) *Server {
+	s.handler = h
 	return s
 }
 
@@ -65,17 +66,7 @@ func (s Server) handleConnection(conn net.Conn) {
 		return
 	}
 
-	handler, params, ok := s.router.Search(req.Method, req.Target)
-	if !ok {
-		res := prepareResponse(req)
-		res.Status = types.StatusNotFound
-		respond(conn, req, res)
-		return
-	}
-
-	req.Params = params
-	res := prepareResponse(req)
-	handler(context.Background(), req, &res)
+	res := s.handler(context.Background(), req)
 	respond(conn, req, res)
 }
 
