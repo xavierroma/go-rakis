@@ -12,64 +12,27 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/codecrafters-io/http-server-starter-go/app/segmenttree"
+	"github.com/codecrafters-io/http-server-starter-go/app/types"
 )
 
 type Server struct {
-	addr     string
-	handlers map[Method]map[string]Handler
+	addr   string
+	router *segmenttree.SegmentTree
 }
-
-type Method string
-
-const (
-	Get    Method = "GET"
-	Post   Method = "POST"
-	Put    Method = "PUT"
-	Patch  Method = "PATCH"
-	Delete Method = "DELETE"
-)
-
-type Request struct {
-	Method  Method
-	Version string
-	Target  string
-	Headers map[string]string
-	Body    *string
-	Params  map[string]string
-}
-type Status int
-
-const (
-	StatusOK Status = iota
-	StatusNotFound
-	StatusBadRequest
-	StatusInternalServerError
-	StatusCreated
-)
-
-type Response struct {
-	Status  Status
-	Body    []byte
-	Headers map[string]string
-}
-
-type Handler func(ctx context.Context, req Request, res *Response)
 
 type Error error
 
 func NewServer(addr string) Server {
 	return Server{
-		addr:     addr,
-		handlers: make(map[Method]map[string]Handler),
+		addr:   addr,
+		router: segmenttree.NewSegmentTree(),
 	}
 }
 
-func (s Server) RegisterHandler(m Method, p string, h Handler) Server {
-	_, ok := s.handlers[m]
-	if !ok {
-		s.handlers[m] = make(map[string]Handler, 1)
-	}
-	s.handlers[m][p] = h
+func (s Server) RegisterHandler(m types.Method, p string, h types.Handler) Server {
+	s.router.Insert(m, p, h)
 	return s
 }
 
@@ -95,30 +58,29 @@ func (s Server) handleConnection(conn net.Conn) {
 	req, err := parseRequest(conn)
 	if err != nil {
 		fmt.Println("Failed to parse request:", err)
-		errorRes := prepareResponse(Request{})
-		errorRes.Status = StatusBadRequest
+		errorRes := prepareResponse(types.Request{})
+		errorRes.Status = types.StatusBadRequest
 		errorRes.Headers["Connection"] = "close"
-		respond(conn, Request{Headers: map[string]string{"Connection": "close"}}, errorRes)
+		respond(conn, types.Request{Headers: map[string]string{"Connection": "close"}}, errorRes)
 		return
 	}
 
-	handle, ok := findHandler(s.handlers[Method(req.Method)], &req)
+	handler, params, ok := s.router.Search(req.Method, req.Target)
 	if !ok {
 		res := prepareResponse(req)
-		res.Status = StatusNotFound
+		res.Status = types.StatusNotFound
 		respond(conn, req, res)
 		return
 	}
 
+	req.Params = params
 	res := prepareResponse(req)
-
-	(*handle)(context.Background(), req, &res)
-
+	handler(context.Background(), req, &res)
 	respond(conn, req, res)
 }
 
-func parseRequest(conn net.Conn) (Request, Error) {
-	result := Request{
+func parseRequest(conn net.Conn) (types.Request, Error) {
+	result := types.Request{
 		Headers: make(map[string]string),
 		Body:    nil,
 	}
@@ -137,7 +99,7 @@ func parseRequest(conn net.Conn) (Request, Error) {
 	if len(requestLineParts) != 3 {
 		return result, fmt.Errorf("malformed request line: %q", string(requestLineBytes))
 	}
-	result.Method = Method(string(requestLineParts[0]))
+	result.Method = types.Method(string(requestLineParts[0]))
 	result.Target = string(requestLineParts[1])
 	result.Version = string(requestLineParts[2])
 
@@ -184,9 +146,9 @@ func parseRequest(conn net.Conn) (Request, Error) {
 	return result, nil
 }
 
-func prepareResponse(r Request) Response {
-	return Response{
-		Status: StatusOK,
+func prepareResponse(r types.Request) types.Response {
+	return types.Response{
+		Status: types.StatusOK,
 		Headers: map[string]string{
 			"Server": "go-server/0.1",
 			"Date":   time.Now().UTC().Format(time.RFC1123),
@@ -195,15 +157,15 @@ func prepareResponse(r Request) Response {
 	}
 }
 
-func respond(conn net.Conn, req Request, r Response) {
+func respond(conn net.Conn, req types.Request, r types.Response) {
 	crlf := []byte("\r\n")
 
-	rspMap := map[Status]string{
-		StatusOK:                  "HTTP/1.1 200 OK",
-		StatusNotFound:            "HTTP/1.1 404 Not Found",
-		StatusBadRequest:          "HTTP/1.1 400 Bad Request",
-		StatusInternalServerError: "HTTP/1.1 500 Internal Server Error",
-		StatusCreated:             "HTTP/1.1 201 Created",
+	rspMap := map[types.Status]string{
+		types.StatusOK:                  "HTTP/1.1 200 OK",
+		types.StatusNotFound:            "HTTP/1.1 404 Not Found",
+		types.StatusBadRequest:          "HTTP/1.1 400 Bad Request",
+		types.StatusInternalServerError: "HTTP/1.1 500 Internal Server Error",
+		types.StatusCreated:             "HTTP/1.1 201 Created",
 	}
 
 	if _, ok := r.Headers["Content-Length"]; !ok && r.Body != nil {
@@ -273,30 +235,4 @@ func respond(conn net.Conn, req Request, r Response) {
 			return
 		}
 	}
-}
-
-func findHandler(handlers map[string]Handler, req *Request) (*Handler, bool) {
-	targetSegments := strings.Split(req.Target, "/")
-Outer:
-	for path, handler := range handlers {
-		handlerSegments := strings.Split(path, "/")
-		if len(targetSegments) != len(handlerSegments) {
-			continue
-		}
-		params := make(map[string]string, 0)
-		for i := 0; i < len(handlerSegments); i++ {
-			isParam := strings.HasPrefix(handlerSegments[i], ":")
-			if isParam {
-				params[strings.Replace(handlerSegments[i], ":", "", 1)] = targetSegments[i]
-				continue
-			}
-			if handlerSegments[i] != targetSegments[i] {
-				continue Outer
-			}
-		}
-		req.Params = params
-		return &handler, true
-	}
-
-	return nil, false
 }
