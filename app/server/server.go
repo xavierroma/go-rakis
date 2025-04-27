@@ -94,6 +94,10 @@ func parseRequest(conn net.Conn) (types.Request, Error) {
 	result.Target = string(requestLineParts[1])
 	result.Version = string(requestLineParts[2])
 
+	if result.Version != "HTTP/1.1" {
+		return result, fmt.Errorf("unsupported HTTP version: %q", result.Version)
+	}
+
 	for {
 		headerLineBytes, err := reader.ReadBytes('\n')
 		if err != nil {
@@ -139,17 +143,19 @@ func parseRequest(conn net.Conn) (types.Request, Error) {
 
 func prepareResponse(r types.Request) types.Response {
 	return types.Response{
-		Status: types.StatusOK,
-		Headers: map[string]string{
-			"Server": "go-server/0.1",
-			"Date":   time.Now().UTC().Format(time.RFC1123),
-		},
-		Body: nil,
+		Status:     types.StatusOK,
+		Headers:    map[string]string{"Server": "go-server/0.1", "Date": time.Now().UTC().Format(time.RFC1123)},
+		Body:       nil,
+		BodyReader: nil,
 	}
 }
 
 func respond(conn net.Conn, req types.Request, r types.Response) {
 	crlf := []byte("\r\n")
+
+	if r.Headers == nil {
+		r.Headers = make(map[string]string)
+	}
 
 	rspMap := map[types.Status]string{
 		types.StatusOK:                  "HTTP/1.1 200 OK",
@@ -159,21 +165,48 @@ func respond(conn net.Conn, req types.Request, r types.Response) {
 		types.StatusCreated:             "HTTP/1.1 201 Created",
 	}
 
-	if _, ok := r.Headers["Content-Length"]; !ok && r.Body != nil {
-		r.Headers["Content-Length"] = strconv.Itoa(len(r.Body))
-	}
-
 	connectionHeader := "keep-alive"
-	if req.Headers["Connection"] == "close" || r.Status >= 400 {
+	isErrorStatus := r.Status == types.StatusBadRequest || r.Status == types.StatusNotFound || r.Status == types.StatusInternalServerError
+	if req.Headers["Connection"] == "close" || isErrorStatus {
 		connectionHeader = "close"
 	}
 	r.Headers["Connection"] = connectionHeader
 
-	canUseGzip := false
-	if acceptEncoding, ok := req.Headers["Accept-Encoding"]; ok {
-		if strings.Contains(acceptEncoding, "gzip") {
-			canUseGzip = true
+	isChunked := r.BodyReader != nil
+	var bodyToWrite []byte = r.Body
+
+	if !isChunked {
+		if _, ok := r.Headers["Content-Length"]; !ok && r.Body != nil {
+			r.Headers["Content-Length"] = strconv.Itoa(len(r.Body))
+		} else if !ok && r.Body == nil {
+			r.Headers["Content-Length"] = "0"
 		}
+
+		canUseGzip := false
+		if acceptEncoding, ok := req.Headers["Accept-Encoding"]; ok {
+			if strings.Contains(acceptEncoding, "gzip") {
+				canUseGzip = true
+			}
+		}
+
+		if canUseGzip && r.Body != nil {
+			var buf bytes.Buffer
+			gz := gzip.NewWriter(&buf)
+			if _, err := gz.Write(r.Body); err == nil {
+				if err := gz.Close(); err == nil {
+					bodyToWrite = buf.Bytes()
+					r.Headers["Content-Encoding"] = "gzip"
+					r.Headers["Content-Length"] = strconv.Itoa(len(bodyToWrite))
+				} else {
+					fmt.Println("Error closing gzip writer:", err)
+				}
+			} else {
+				fmt.Println("Error writing to gzip writer:", err)
+			}
+		}
+	} else {
+		r.Headers["Transfer-Encoding"] = "chunked"
+		delete(r.Headers, "Content-Length")
 	}
 
 	statusLine := rspMap[r.Status]
@@ -184,23 +217,6 @@ func respond(conn net.Conn, req types.Request, r types.Response) {
 	if _, err := conn.Write(crlf); err != nil {
 		fmt.Println("Error writing CRLF after status line:", err)
 		return
-	}
-
-	var bodyToWrite []byte = r.Body
-	if canUseGzip && r.Body != nil {
-		var buf bytes.Buffer
-		gz := gzip.NewWriter(&buf)
-		if _, err := gz.Write(r.Body); err == nil {
-			if err := gz.Close(); err == nil {
-				bodyToWrite = buf.Bytes()
-				r.Headers["Content-Encoding"] = "gzip"
-				r.Headers["Content-Length"] = strconv.Itoa(len(bodyToWrite))
-			} else {
-				fmt.Println("Error closing gzip writer:", err)
-			}
-		} else {
-			fmt.Println("Error writing to gzip writer:", err)
-		}
 	}
 
 	for k, v := range r.Headers {
@@ -220,9 +236,54 @@ func respond(conn net.Conn, req types.Request, r types.Response) {
 		return
 	}
 
-	if bodyToWrite != nil {
+	if isChunked {
+		buf := make([]byte, 4*1024)
+		for {
+			n, err := r.BodyReader.Read(buf)
+			if n > 0 {
+				chunkSizeHex := []byte(strconv.FormatInt(int64(n), 16))
+				if _, wErr := conn.Write(chunkSizeHex); wErr != nil {
+					fmt.Println("Error writing chunk size:", wErr)
+					return
+				}
+				if _, wErr := conn.Write(crlf); wErr != nil {
+					fmt.Println("Error writing CRLF after chunk size:", wErr)
+					return
+				}
+
+				if _, wErr := conn.Write(buf[:n]); wErr != nil {
+					fmt.Println("Error writing chunk data:", wErr)
+					return
+				}
+				if _, wErr := conn.Write(crlf); wErr != nil {
+					fmt.Println("Error writing CRLF after chunk data:", wErr)
+					return
+				}
+			}
+
+			if err != nil {
+				if err == io.EOF {
+					if _, wErr := conn.Write([]byte("0")); wErr != nil {
+						fmt.Println("Error writing zero chunk size:", wErr)
+						return
+					}
+					if _, wErr := conn.Write(crlf); wErr != nil {
+						fmt.Println("Error writing CRLF after zero chunk size:", wErr)
+						return
+					}
+					if _, wErr := conn.Write(crlf); wErr != nil {
+						fmt.Println("Error writing final CRLF for chunked:", wErr)
+						return
+					}
+				} else {
+					fmt.Println("Error reading from body reader:", err)
+				}
+				break
+			}
+		}
+	} else if bodyToWrite != nil {
 		if _, err := conn.Write(bodyToWrite); err != nil {
-			fmt.Println("Error writing body:", err)
+			fmt.Println("Error writing non-chunked body:", err)
 			return
 		}
 	}

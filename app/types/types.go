@@ -1,6 +1,9 @@
 package types
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 type Method string
 
@@ -34,7 +37,8 @@ const (
 )
 
 type Response struct {
-	Status  Status
-	Body    []byte
-	Headers map[string]string
+	Status     Status
+	Body       []byte
+	BodyReader io.Reader
+	Headers    map[string]string
 }

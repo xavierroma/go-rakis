@@ -24,7 +24,7 @@ It's a personal learning exercise – totally pointless for practical use.
 | Gzip Response Compression (`Accept-Encoding` based)        | [RFC 7231 §5.3.4](https://datatracker.ietf.org/doc/html/rfc7231#section-5.3.4), [RFC 1952](https://datatracker.ietf.org/doc/html/rfc1952)           | ✅        |
 | Concurrent Connection Handling                           | N/A                                                                                                              | ✅        |
 | Request Body Parsing (`Content-Length` based)            | [RFC 7230 §3.3.2](https://datatracker.ietf.org/doc/html/rfc7230#section-3.3.2)                                      | ✅        |
-| Chunked Transfer Encoding                                  | [RFC 7230 §4.1](https://datatracker.ietf.org/doc/html/rfc7230#section-4.1)                                          | ⏳        |
+| Chunked Transfer Encoding                                  | [RFC 7230 §4.1](https://datatracker.ietf.org/doc/html/rfc7230#section-4.1)                                          | ✅        |
 | Persistent Connections / Keep-Alive                      | [RFC 7230 §6.3](https://datatracker.ietf.org/doc/html/rfc7230#section-6.3)                                          | ⏳        |
 | Connection Timeouts                                        | [RFC 7230 §6.5](https://datatracker.ietf.org/doc/html/rfc7230#section-6.5)                                          | ⏳        |
 | Content Negotiation (Accept\*, etc.)                     | [RFC 7231 §5.3](https://datatracker.ietf.org/doc/html/rfc7231#section-5.3)                                          | ⏳        |
